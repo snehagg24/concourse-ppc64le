@@ -1,23 +1,33 @@
-FROM golang:1.16.2-alpine3.13 as builder
+ARG base_image
+ARG builder_image=quay.io/snehakpersistent/golang-builder:ppc64le
 
-ARG registry_image_resource_version
+FROM ${builder_image} as builder
+WORKDIR /src
 
-RUN apk add git
-RUN git clone --depth 1 --branch v${registry_image_resource_version} https://github.com/concourse/registry-image-resource.git /src/registry-image-resource
-WORKDIR /src/registry-image-resource
+COPY go.mod .
+COPY go.sum .
+RUN go mod download
+
+COPY . .
 ENV CGO_ENABLED 0
-RUN go get -d ./...
 RUN go build -o /assets/in ./cmd/in
 RUN go build -o /assets/out ./cmd/out
 RUN go build -o /assets/check ./cmd/check
+RUN set -e; for pkg in $(go list ./...); do \
+		go test -o "/tests/$(basename $pkg).test" -c $pkg; \
+	done
 
-FROM alpine:edge AS resource
-RUN apk add --no-cache bash tzdata ca-certificates unzip zip gzip tar
+FROM ubuntu:focal AS resource
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt update && apt upgrade -y -o Dpkg::Options::="--force-confdef"
+RUN apt update \
+      && apt install -y --no-install-recommends \
+        tzdata \
+        ca-certificates \
+        unzip \
+        zip \
+      && rm -rf /var/lib/apt/lists/*
 COPY --from=builder assets/ /opt/resource/
 RUN chmod +x /opt/resource/*
-# Ensure /etc/hosts is honored
-# https://github.com/golang/go/issues/22846
-# https://github.com/gliderlabs/docker-alpine/issues/367
-RUN echo "hosts: files dns" > /etc/nsswitch.conf
 
 FROM resource
