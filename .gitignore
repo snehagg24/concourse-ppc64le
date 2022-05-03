@@ -1,3 +1,0 @@
-resource-types/*
-!resource-types/Dockerfile*
-!resource-types/.dockerignore
